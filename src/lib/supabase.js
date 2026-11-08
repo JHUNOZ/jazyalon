@@ -9,15 +9,32 @@ import { logSecurityEvent, normalizeEmail, sanitizeInput } from '../utils/securi
  *   con respaldo local instantáneo cuando corre sin credenciales cloud.
  */
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://placeholder-jazyalon.supabase.co';
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'placeholder-anon-key';
+const rawSupabaseUrl = String(
+  import.meta.env.VITE_SUPABASE_URL ||
+    import.meta.env.NEXT_PUBLIC_SUPABASE_URL ||
+    ''
+).trim();
+
+const rawSupabaseKey = String(
+  import.meta.env.VITE_SUPABASE_ANON_KEY ||
+    import.meta.env.VITE_SUPABASE_PUBLISHABLE_DEFAULT_KEY ||
+    import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
+    import.meta.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+    import.meta.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY ||
+    import.meta.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+    ''
+).trim();
+
+const supabaseUrl = rawSupabaseUrl || 'https://placeholder-jazyalon.supabase.co';
+const supabaseAnonKey = rawSupabaseKey || 'placeholder-anon-key';
 
 export const isSupabaseConfigured = () => {
   return Boolean(
-    import.meta.env.VITE_SUPABASE_URL &&
-      import.meta.env.VITE_SUPABASE_ANON_KEY &&
-      !String(import.meta.env.VITE_SUPABASE_URL).includes('placeholder') &&
-      !String(import.meta.env.VITE_SUPABASE_ANON_KEY).includes('placeholder')
+    rawSupabaseUrl &&
+      rawSupabaseKey &&
+      !rawSupabaseUrl.includes('placeholder') &&
+      !rawSupabaseKey.includes('placeholder') &&
+      !rawSupabaseKey.includes('tu-')
   );
 };
 
