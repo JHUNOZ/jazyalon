@@ -1,5 +1,5 @@
 import React from 'react';
-import { Instagram, Phone, Mail, MapPin } from 'lucide-react';
+import { Instagram, Lock } from 'lucide-react';
 import { BRAND_INFO, CATEGORIES } from '../../data/mockData';
 import { useShop } from '../../context/ShopContext';
 
@@ -151,9 +151,23 @@ export default function Footer({ setCurrentView, onOpenLegal }) {
 
         </div>
 
-        {/* Bottom Simple Copyright */}
-        <div className="pt-6 text-center text-[10px] text-white/40 tracking-wider">
-          © {new Date().getFullYear()} JAZYALON • Alta Costura Victoriana & Corsetería en Chile. Todos los derechos reservados.
+        {/* Bottom Simple Copyright + Discreet Admin Gate Access */}
+        <div className="pt-6 flex flex-col sm:flex-row items-center justify-between gap-2 text-center text-[10px] text-white/40 tracking-wider">
+          <span>
+            © {new Date().getFullYear()} JAZYALON • Alta Costura Victoriana & Corsetería en Chile. Todos los derechos reservados.
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              setCurrentView('admin');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            className="inline-flex items-center gap-1.5 text-[10px] text-white/35 hover:text-luxury-gold transition-colors cursor-pointer"
+            title="Acceso al Panel de Administración"
+          >
+            <Lock className="w-3 h-3" />
+            <span>Acceso Administración</span>
+          </button>
         </div>
 
       </div>

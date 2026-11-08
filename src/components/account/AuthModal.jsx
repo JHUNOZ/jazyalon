@@ -41,6 +41,7 @@ export default function AuthModal({ setCurrentView }) {
   const [phone, setPhone] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
   if (!isAuthOpen) return null;
 
@@ -58,23 +59,35 @@ export default function AuthModal({ setCurrentView }) {
     setErrorMsg('');
   };
 
-  const handleQuickAdmin = () => {
-    quickAdminLogin();
-    resetFields();
-    setIsAuthOpen(false);
-    if (setCurrentView) setCurrentView('admin');
-  };
-
-  const handleQuickCustomer = () => {
-    const res = loginUser('valentina@correo.cl', 'cliente1234');
-    if (res.success) {
+  const handleQuickAdmin = async () => {
+    setSubmitting(true);
+    try {
+      await Promise.resolve(quickAdminLogin());
       resetFields();
       setIsAuthOpen(false);
-      if (setCurrentView) setCurrentView('account');
+      if (setCurrentView) setCurrentView('admin');
+    } finally {
+      setSubmitting(false);
     }
   };
 
-  const handleSubmit = (e) => {
+  const handleQuickCustomer = async () => {
+    setSubmitting(true);
+    try {
+      const res = await Promise.resolve(loginUser('valentina@correo.cl', 'cliente1234'));
+      if (res?.success) {
+        resetFields();
+        setIsAuthOpen(false);
+        if (setCurrentView) setCurrentView('account');
+      } else {
+        setErrorMsg(res?.message || 'En modo Supabase, regístrate o inicia sesión con una cuenta real.');
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setErrorMsg('');
 
@@ -96,55 +109,67 @@ export default function AuthModal({ setCurrentView }) {
       return;
     }
 
-    if (tab === 'register') {
-      const cleanName = sanitizeName(name);
-      if (cleanName.length < 3) {
-        setErrorMsg('Ingresa tu nombre y apellido válidos (mínimo 3 letras).');
-        return;
-      }
+    setSubmitting(true);
+    try {
+      if (tab === 'register') {
+        const cleanName = sanitizeName(name);
+        if (cleanName.length < 3) {
+          setErrorMsg('Ingresa tu nombre y apellido válidos (mínimo 3 letras).');
+          return;
+        }
 
-      if (password !== confirmPassword) {
-        setErrorMsg('Las contraseñas ingresadas no coinciden.');
-        return;
-      }
+        if (password !== confirmPassword) {
+          setErrorMsg('Las contraseñas ingresadas no coinciden.');
+          return;
+        }
 
-      const cleanPhone = sanitizePhone(phone);
-      if (cleanPhone && !validateChileanPhone(cleanPhone)) {
-        setErrorMsg('Ingresa un teléfono móvil chileno válido (ej: +56 9 1234 5678) o déjalo opcional.');
-        return;
-      }
+        const cleanPhone = sanitizePhone(phone);
+        if (cleanPhone && !validateChileanPhone(cleanPhone)) {
+          setErrorMsg('Ingresa un teléfono móvil chileno válido (ej: +56 9 1234 5678) o déjalo opcional.');
+          return;
+        }
 
-      const regRes = registerUser({
-        name: cleanName,
-        email: cleanEmail,
-        password,
-        phone: cleanPhone
-      });
+        const regRes = await Promise.resolve(
+          registerUser({
+            name: cleanName,
+            email: cleanEmail,
+            password,
+            phone: cleanPhone
+          })
+        );
 
-      if (!regRes.success) {
-        setErrorMsg(regRes.message);
-        return;
-      }
+        if (!regRes?.success) {
+          setErrorMsg(regRes?.message || 'No se pudo completar el registro.');
+          return;
+        }
 
-      logSecurityEvent('USER_REGISTER_SUCCESS', { email: cleanEmail, role: regRes.user?.role });
-      resetFields();
-      setIsAuthOpen(false);
-      if (setCurrentView) {
-        setCurrentView(regRes.user?.role === 'admin' ? 'admin' : 'account');
-      }
-    } else {
-      const loginRes = loginUser(cleanEmail, password);
-      if (!loginRes.success) {
-        setErrorMsg(loginRes.message);
-        return;
-      }
+        logSecurityEvent('USER_REGISTER_SUCCESS', { email: cleanEmail, role: regRes.user?.role });
+        resetFields();
+        if (regRes.requiresEmailConfirm) {
+          setTab('login');
+          setEmail(cleanEmail);
+          return;
+        }
+        setIsAuthOpen(false);
+        if (setCurrentView) {
+          setCurrentView(regRes.user?.role === 'admin' ? 'admin' : 'account');
+        }
+      } else {
+        const loginRes = await Promise.resolve(loginUser(cleanEmail, password));
+        if (!loginRes?.success) {
+          setErrorMsg(loginRes?.message || 'Credenciales inválidas.');
+          return;
+        }
 
-      logSecurityEvent('USER_LOGIN_SUCCESS', { email: cleanEmail, role: loginRes.user?.role });
-      resetFields();
-      setIsAuthOpen(false);
-      if (setCurrentView) {
-        setCurrentView(loginRes.user?.role === 'admin' ? 'admin' : 'account');
+        logSecurityEvent('USER_LOGIN_SUCCESS', { email: cleanEmail, role: loginRes.user?.role });
+        resetFields();
+        setIsAuthOpen(false);
+        if (setCurrentView) {
+          setCurrentView(loginRes.user?.role === 'admin' ? 'admin' : 'account');
+        }
       }
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -349,9 +374,14 @@ export default function AuthModal({ setCurrentView }) {
 
           <button
             type="submit"
-            className="w-full py-3 bg-[#181514] hover:bg-[#9E7B3B] text-white font-semibold tracking-wide text-xs rounded-lg transition-colors mt-2 shadow-sm cursor-pointer"
+            disabled={submitting}
+            className="w-full py-3 bg-[#181514] hover:bg-[#9E7B3B] disabled:opacity-60 text-white font-semibold tracking-wide text-xs rounded-lg transition-colors mt-2 shadow-sm cursor-pointer"
           >
-            {tab === 'login' ? 'Entrar a mi Cuenta' : 'Crear Cuenta Segura'}
+            {submitting
+              ? 'Verificando...'
+              : tab === 'login'
+              ? 'Entrar a mi Cuenta'
+              : 'Crear Cuenta Segura'}
           </button>
 
           {isLocalhost && (

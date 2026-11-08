@@ -21,6 +21,7 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { useShop } from '../../context/ShopContext';
+import { syncStockAlertToDb } from '../../lib/supabase';
 import { formatCLP, calculateDiscount, calculateSavings } from '../../utils/formatters';
 import { sanitizeInput, validateEmail, safeJsonParse } from '../../utils/security';
 import ProductCard from '../catalog/ProductCard';
@@ -214,6 +215,7 @@ function ProductDetailContent({ selectedProduct, setSelectedProduct }) {
         createdAt: new Date().toISOString()
       };
       localStorage.setItem('jazyalon_stock_alerts', JSON.stringify([...existingAlerts, newAlert]));
+      syncStockAlertToDb(newAlert);
       window.dispatchEvent(new Event('jazyalon-alerts-updated'));
       setAlertSuccess(true);
       if (showToast) {

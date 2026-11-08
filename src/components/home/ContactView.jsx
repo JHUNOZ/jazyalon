@@ -12,6 +12,7 @@ import {
 import confetti from 'canvas-confetti';
 import { BRAND_INFO } from '../../data/mockData';
 import { useShop } from '../../context/ShopContext';
+import { syncContactMessageToDb } from '../../lib/supabase';
 import VictorianDivider from '../common/VictorianDivider';
 import { sanitizeInput, validateEmail, checkRateLimit } from '../../utils/security';
 
@@ -47,6 +48,14 @@ export default function ContactView() {
       showToast(rateCheck.message, 'error');
       return;
     }
+
+    syncContactMessageToDb({
+      name: cleanName,
+      email: cleanEmail,
+      phone: formData.phone,
+      subject: formData.subject,
+      message: cleanMessage
+    });
 
     setSubmitted(true);
     showToast('¡Mensaje enviado con éxito! Te responderemos a la brevedad 🌹');

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Crown, ArrowRight, Eye } from 'lucide-react';
 import { ShopProvider, useShop } from './context/ShopContext';
 import AnnouncementBar from './components/common/AnnouncementBar';
@@ -172,8 +172,24 @@ function AppShell({ currentView, navigate, curtainRef, isLegalOpen, setIsLegalOp
 }
 
 export default function App() {
-  const [currentView, setCurrentView] = useState('home'); // 'home' | 'catalog' | 'wishlist' | 'contact' | 'account' | 'admin'
+  const [currentView, setCurrentView] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const path = window.location.pathname.replace(/\/+$/, '').toLowerCase();
+      if (path === '/admin') return 'admin';
+    }
+    return 'home';
+  }); // 'home' | 'catalog' | 'wishlist' | 'contact' | 'account' | 'admin'
   const { navigate, curtainRef } = usePageTransition(currentView, setCurrentView);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const currentPath = window.location.pathname.replace(/\/+$/, '').toLowerCase();
+    if (currentView === 'admin' && currentPath !== '/admin') {
+      window.history.replaceState(null, '', '/admin');
+    } else if (currentView !== 'admin' && currentPath === '/admin') {
+      window.history.replaceState(null, '', '/');
+    }
+  }, [currentView]);
 
   // Legal & Privacy Compliance State (Ley 19.496 / Ley 19.628)
   const [isLegalOpen, setIsLegalOpen] = useState(false);

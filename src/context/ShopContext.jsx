@@ -26,21 +26,38 @@ import {
 import {
   supabase,
   isSupabaseConfigured,
+  signInWithCloud,
+  fetchCurrentCloudSessionUser,
+  signOutFromCloud,
+  registerUserInCloud,
+  createSecondaryAdminAccountInCloud,
+  syncProfileUpdateToDb,
+  mapDbRowToProduct,
+  mapDbOrderToStoreOrder,
+  syncCategoryToDb,
+  removeCategoryFromDb,
+  syncCollectionToDb,
+  removeCollectionFromDb,
+  syncProductToDb,
+  syncMultipleProductsToDb,
+  removeProductFromDb,
   syncSiteSettingsToDb,
   syncAdminEmailToDb,
   removeAdminEmailFromDb,
-  registerUserInCloud,
-  syncProfileUpdateToDb,
-  syncOrderToDb,
   syncHeroSlidesToDb,
   syncCouponToDb,
   removeCouponFromDb,
   syncSubscriberToDb,
   removeSubscriberFromDb,
-  syncNotificationToDb
+  syncNotificationToDb,
+  createOrderInDb,
+  updateOrderInDb,
+  trackOrderInCloud
 } from '../lib/supabase';
 
 const ShopContext = createContext();
+
+export const PRIMARY_ADMIN_EMAIL = 'jazz@jazyalon.cl';
 
 const STORAGE_KEYS = {
   PRODUCTS: 'jazyalon_v2_products',
@@ -63,7 +80,7 @@ const STORAGE_KEYS = {
 
 const DEFAULT_ADMIN_EMAILS = [
   {
-    email: 'admin@jazyalon.cl',
+    email: PRIMARY_ADMIN_EMAIL,
     name: 'Jazz',
     addedBy: 'Sistema',
     addedAt: '2026-10-01T10:00:00Z',
@@ -129,8 +146,8 @@ const DEFAULT_USERS = [
   {
     id: 'usr-admin-01',
     name: 'Jazz',
-    email: 'admin@jazyalon.cl',
-    passwordDigest: computePasswordDigest('admin1234', 'admin@jazyalon.cl'),
+    email: PRIMARY_ADMIN_EMAIL,
+    passwordDigest: computePasswordDigest('Jazyalon2026!Admin', PRIMARY_ADMIN_EMAIL),
     role: 'admin',
     phone: '+56 9 4018 7563',
     createdAt: '2026-10-01T10:00:00Z'
@@ -247,20 +264,28 @@ const sanitizeUsersList = (rawUsers, adminEmailList = DEFAULT_ADMIN_EMAILS) => {
   source.forEach((u, idx) => {
     if (!u || typeof u !== 'object') return;
     const cleanEmail = normalizeEmail(u.email);
-    if (!cleanEmail || !validateEmail(cleanEmail) || seenEmails.has(cleanEmail)) return;
+    if (
+      !cleanEmail ||
+      cleanEmail === 'admin@jazyalon.cl' ||
+      !validateEmail(cleanEmail) ||
+      seenEmails.has(cleanEmail)
+    ) {
+      return;
+    }
     seenEmails.add(cleanEmail);
 
+    const defaultPw = cleanEmail === PRIMARY_ADMIN_EMAIL ? 'Jazyalon2026!Admin' : 'cliente1234';
     const digest =
       u.passwordDigest ||
-      (u.password ? computePasswordDigest(u.password, cleanEmail) : computePasswordDigest('cliente1234', cleanEmail));
+      (u.password ? computePasswordDigest(u.password, cleanEmail) : computePasswordDigest(defaultPw, cleanEmail));
 
-    const isAuthorizedAdmin = adminSet.has(cleanEmail) || u.role === 'admin';
+    const isAuthorizedAdmin = adminSet.has(cleanEmail) || u.role === 'admin' || cleanEmail === PRIMARY_ADMIN_EMAIL;
     const rawName = sanitizeName(u.name);
     const resolvedName =
-      cleanEmail === 'admin@jazyalon.cl' &&
+      cleanEmail === PRIMARY_ADMIN_EMAIL &&
       (!rawName || rawName.toLowerCase().includes('administrador'))
         ? 'Jazz'
-        : rawName || cleanEmail.split('@')[0];
+        : rawName || (cleanEmail === PRIMARY_ADMIN_EMAIL ? 'Jazz' : cleanEmail.split('@')[0]);
 
     cleaned.push({
       id: u.id || `usr-${idx + 1}-${Date.now()}`,
@@ -276,8 +301,8 @@ const sanitizeUsersList = (rawUsers, adminEmailList = DEFAULT_ADMIN_EMAILS) => {
     });
   });
 
-  // Garantizar que el administrador principal exista siempre
-  if (!seenEmails.has('admin@jazyalon.cl')) {
+  // Garantizar que la administradora principal (Jazz) exista siempre
+  if (!seenEmails.has(PRIMARY_ADMIN_EMAIL)) {
     cleaned.unshift(DEFAULT_USERS[0]);
   }
 
@@ -298,25 +323,32 @@ const sanitizeAdminEmailsList = (rawList) => {
   source.forEach((item) => {
     const rawEmail = typeof item === 'string' ? item : item?.email;
     const cleanEmail = normalizeEmail(rawEmail);
-    if (!cleanEmail || !validateEmail(cleanEmail) || seen.has(cleanEmail)) return;
+    if (
+      !cleanEmail ||
+      cleanEmail === 'admin@jazyalon.cl' ||
+      !validateEmail(cleanEmail) ||
+      seen.has(cleanEmail)
+    ) {
+      return;
+    }
     seen.add(cleanEmail);
     const rawName = sanitizeName(item?.name || '');
     const resolvedName =
-      cleanEmail === 'admin@jazyalon.cl' &&
+      cleanEmail === PRIMARY_ADMIN_EMAIL &&
       (!rawName || rawName.toLowerCase().includes('administrador'))
         ? 'Jazz'
-        : rawName || (cleanEmail === 'admin@jazyalon.cl' ? 'Jazz' : 'Acceso Admin');
+        : rawName || (cleanEmail === PRIMARY_ADMIN_EMAIL ? 'Jazz' : 'Acceso Admin');
 
     result.push({
       email: cleanEmail,
       name: resolvedName,
       addedBy: sanitizeInput(item?.addedBy || 'Administración', 120),
       addedAt: item?.addedAt || new Date().toISOString(),
-      isPrimary: cleanEmail === 'admin@jazyalon.cl' || Boolean(item?.isPrimary)
+      isPrimary: cleanEmail === PRIMARY_ADMIN_EMAIL || Boolean(item?.isPrimary)
     });
   });
 
-  if (!seen.has('admin@jazyalon.cl')) {
+  if (!seen.has(PRIMARY_ADMIN_EMAIL)) {
     result.unshift(DEFAULT_ADMIN_EMAILS[0]);
   }
 
@@ -560,13 +592,15 @@ export const ShopProvider = ({ children }) => {
   const [currentUser, setCurrentUser] = useState(() => {
     const raw = safeLoad(STORAGE_KEYS.CURRENT_USER, null);
     if (!raw || !raw.email) return null;
-    const cleanEmail = normalizeEmail(raw.email);
+    const rawCleanEmail = normalizeEmail(raw.email);
+    const cleanEmail =
+      rawCleanEmail === 'admin@jazyalon.cl' ? PRIMARY_ADMIN_EMAIL : rawCleanEmail;
     const rawName = sanitizeName(raw.name);
     const resolvedName =
-      cleanEmail === 'admin@jazyalon.cl' &&
+      cleanEmail === PRIMARY_ADMIN_EMAIL &&
       (!rawName || rawName.toLowerCase().includes('administrador'))
         ? 'Jazz'
-        : rawName || cleanEmail.split('@')[0];
+        : rawName || (cleanEmail === PRIMARY_ADMIN_EMAIL ? 'Jazz' : cleanEmail.split('@')[0]);
     return stripSensitiveUserFields({
       ...raw,
       email: cleanEmail,
@@ -598,7 +632,9 @@ export const ShopProvider = ({ children }) => {
   });
 
   // Orders & Real-Time Tracking State
-  const [orders, setOrders] = useState(() => safeLoad(STORAGE_KEYS.ORDERS, INITIAL_ORDERS));
+  const [orders, setOrders] = useState(() =>
+    safeLoad(STORAGE_KEYS.ORDERS, isSupabaseConfigured() ? [] : INITIAL_ORDERS)
+  );
 
   // Cart & Wishlist state
   const [cart, setCart] = useState(() => safeJsonParse(localStorage.getItem(STORAGE_KEYS.CART), []));
@@ -646,20 +682,45 @@ export const ShopProvider = ({ children }) => {
     }, 3500);
   }, []);
 
-  // Load Cloud Settings & Authorized Admins on Mount when Supabase is configured
+  // Load Cloud Catalog, Settings, Coupons, Notifications & Auth Session on Mount when Supabase is configured
   useEffect(() => {
     if (!isSupabaseConfigured()) return;
     let active = true;
 
     (async () => {
       try {
-        const { data: settingsRow } = await supabase
-          .from('site_settings')
-          .select('*')
-          .eq('id', 'main')
-          .maybeSingle();
+        // 1. Verificar sesión real de Supabase Auth (JWT) para no dejar sesiones locales fantasma
+        const cloudSessionUser = await fetchCurrentCloudSessionUser();
+        if (active) {
+          setCurrentUser(cloudSessionUser ? stripSensitiveUserFields(cloudSessionUser) : null);
+        }
 
-        if (active && settingsRow) {
+        // 2. Cargar configuración pública, categorías, colecciones, productos, carrusel, cupones y avisos en paralelo
+        const [
+          { data: settingsRow },
+          { data: cloudCats },
+          { data: cloudCols },
+          { data: cloudProds },
+          { data: cloudSlides },
+          { data: cloudCoupons },
+          { data: cloudNotifs }
+        ] = await Promise.all([
+          supabase.from('site_settings').select('*').eq('id', 'main').maybeSingle(),
+          supabase.from('categories').select('*').order('display_order', { ascending: true }),
+          supabase.from('collections').select('*').order('display_order', { ascending: true }),
+          supabase.from('products').select('*').order('created_at', { ascending: false }),
+          supabase.from('hero_slides').select('*').order('display_order', { ascending: true }),
+          supabase.from('coupons').select('*').order('created_at', { ascending: true }),
+          supabase
+            .from('subscriber_notifications')
+            .select('*')
+            .order('created_at', { ascending: false })
+            .limit(60)
+        ]);
+
+        if (!active) return;
+
+        if (settingsRow) {
           setSiteSettings((prev) =>
             sanitizeSiteSettings({
               maintenance: {
@@ -678,8 +739,65 @@ export const ShopProvider = ({ children }) => {
           );
         }
 
-        const { data: cloudCoupons } = await supabase.from('coupons').select('*');
-        if (active && Array.isArray(cloudCoupons) && cloudCoupons.length > 0) {
+        let resolvedCategories = CATEGORIES;
+        if (Array.isArray(cloudCats) && cloudCats.length > 0) {
+          const mappedCats = cloudCats
+            .filter((c) => c.id !== 'all')
+            .map((c) => ({
+              id: c.id,
+              name: c.name,
+              description: c.description || '',
+              display_order: c.display_order || 0,
+              count: 0
+            }));
+          resolvedCategories = [
+            { id: 'all', name: 'Todos los Diseños', count: mappedCats.length },
+            ...mappedCats
+          ];
+          setCategories(resolvedCategories);
+        }
+
+        if (Array.isArray(cloudCols) && cloudCols.length > 0) {
+          setCollections(
+            cloudCols.map((col) => ({
+              id: col.id,
+              name: col.name,
+              title: col.name,
+              subtitle: col.subtitle || '',
+              itemCount: 'Colección Exclusiva',
+              image:
+                col.image_url ||
+                '/catalogo/1be329e9-5577-451a-8927-91f459ede608.jpeg',
+              primaryProductId: col.primary_product_id || null,
+              isPrimaryFeatured: Boolean(col.is_primary_featured),
+              display_order: col.display_order || 0
+            }))
+          );
+        }
+
+        if (Array.isArray(cloudProds) && cloudProds.length > 0) {
+          setProducts(
+            cloudProds.map((row) =>
+              normalizeStoreProduct(mapDbRowToProduct(row), resolvedCategories)
+            )
+          );
+        }
+
+        if (Array.isArray(cloudSlides) && cloudSlides.length > 0) {
+          setHeroSlides(
+            cloudSlides.map((s, idx) => ({
+              id: s.id ?? idx + 1,
+              tag: s.tag || `Drop 0${idx + 1}`,
+              title: s.title || '',
+              subtitle: s.subtitle || '',
+              cta: s.cta || 'Explorar',
+              category: s.category || 'all',
+              image: s.image || HERO_SLIDES[0].image
+            }))
+          );
+        }
+
+        if (Array.isArray(cloudCoupons) && cloudCoupons.length > 0) {
           setCoupons(
             sanitizeCouponsList(
               cloudCoupons.map((row) => ({
@@ -698,48 +816,41 @@ export const ShopProvider = ({ children }) => {
           );
         }
 
-        const { data: cloudSubs } = await supabase.from('newsletter_subscribers').select('*');
-        if (active && Array.isArray(cloudSubs) && cloudSubs.length > 0) {
-          setSubscribers((prev) =>
-            sanitizeSubscribersList([
-              ...prev,
-              ...cloudSubs.map((row) => ({
-                email: row.email,
-                notifyPriceDrop: row.notify_price_drop,
-                notifyNewCollection: row.notify_new_collection,
-                notifyLowStock: row.notify_low_stock,
-                isActive: row.is_active,
-                subscribedAt: row.subscribed_at
-              }))
-            ])
+        if (Array.isArray(cloudNotifs) && cloudNotifs.length > 0) {
+          setSubscriberNotifications(
+            cloudNotifs.map((n) => ({
+              id: n.id,
+              type: n.event_type || 'custom',
+              title: n.title,
+              message: n.message,
+              image: n.image_url || '',
+              productId: n.product_id || null,
+              collectionId: n.collection_id || null,
+              recipientsCount: Number(n.recipients_count) || 0,
+              createdAt: n.created_at
+            }))
           );
-        }
-
-        const { data: cloudAdmins } = await supabase
-          .from('admin_authorized_emails')
-          .select('email, display_name, added_by, created_at');
-
-        if (active && Array.isArray(cloudAdmins) && cloudAdmins.length > 0) {
-          setAdminEmails((prev) => {
-            const merged = [
-              ...prev,
-              ...cloudAdmins.map((row) => ({
-                email: row.email,
-                name: row.display_name || 'Acceso Admin',
-                addedBy: row.added_by || 'Supabase',
-                addedAt: row.created_at
-              }))
-            ];
-            return sanitizeAdminEmailsList(merged);
-          });
         }
       } catch {
         // Offline / local fallback remains active
       }
     })();
 
+    const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (!active) return;
+      if (event === 'SIGNED_OUT' || !session?.user) {
+        setCurrentUser(null);
+      } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+        const refreshed = await fetchCurrentCloudSessionUser();
+        if (active && refreshed) {
+          setCurrentUser(stripSensitiveUserFields(refreshed));
+        }
+      }
+    });
+
     return () => {
       active = false;
+      authListener?.subscription?.unsubscribe();
     };
   }, []);
 
@@ -921,15 +1032,17 @@ export const ShopProvider = ({ children }) => {
   const ensureCategoryExists = useCallback((catInput, catDisplayName = null) => {
     if (!catInput || catInput === 'all') return 'corsets-brocado';
     const cleanId = catInput.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    const readableName =
+      catDisplayName ||
+      catInput.replace(/-/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase());
     setCategories((prev) => {
       const exists = prev.some(
         (c) => c.id === cleanId || c.name.toLowerCase() === catInput.toLowerCase()
       );
       if (exists) return prev;
-      const readableName =
-        catDisplayName ||
-        catInput.replace(/-/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase());
-      return [...prev, { id: cleanId, name: readableName, count: 1 }];
+      const created = { id: cleanId, name: readableName, count: 1 };
+      syncCategoryToDb(created);
+      return [...prev, created];
     });
     return cleanId;
   }, []);
@@ -1004,35 +1117,35 @@ export const ShopProvider = ({ children }) => {
     [broadcastSync, showToast]
   );
 
-  // Motor de envío automático de notificaciones a personas suscritas
+  // Motor de envío automático de notificaciones a personas suscritas (sin exponer correos PII)
   const dispatchSubscriberNotification = useCallback(
     ({
-      type = 'custom', // 'price_drop' | 'new_collection' | 'low_stock' | 'custom'
+      type,
+      eventType,
       title,
       message,
       productId = null,
       collectionId = null,
       image = ''
     }) => {
+      const resolvedType = eventType || type || 'custom';
       const activeSubs = subscribers.filter((s) => {
         if (s.isActive === false) return false;
-        if (type === 'price_drop') return s.notifyPriceDrop !== false;
-        if (type === 'new_collection') return s.notifyNewCollection !== false;
-        if (type === 'low_stock') return s.notifyLowStock !== false;
+        if (resolvedType === 'price_drop') return s.notifyPriceDrop !== false;
+        if (resolvedType === 'new_collection') return s.notifyNewCollection !== false;
+        if (resolvedType === 'low_stock') return s.notifyLowStock !== false;
         return true;
       });
 
-      const recipientEmails = activeSubs.map((s) => s.email);
       const notifObj = {
         id: `notif-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        type,
+        type: resolvedType,
         title: sanitizeInput(title || 'Novedad en JAZYALON', 160),
         message: sanitizeInput(message || '', 340),
         productId,
         collectionId,
         image: image || '',
-        recipientsCount: recipientEmails.length,
-        recipientEmails,
+        recipientsCount: activeSubs.length,
         createdAt: new Date().toISOString()
       };
 
@@ -1045,7 +1158,7 @@ export const ShopProvider = ({ children }) => {
           typeof window !== 'undefined' &&
           'Notification' in window &&
           window.Notification.permission === 'granted' &&
-          recipientEmails.length > 0
+          activeSubs.length > 0
         ) {
           new window.Notification(`JAZYALON • ${notifObj.title}`, {
             body: notifObj.message,
@@ -1170,9 +1283,9 @@ export const ShopProvider = ({ children }) => {
       const addedEntry = {
         email: cleanEmail,
         name: cleanDisplayName,
-        addedBy: currentUser?.email || 'admin@jazyalon.cl',
+        addedBy: currentUser?.email || PRIMARY_ADMIN_EMAIL,
         addedAt: new Date().toISOString(),
-        isPrimary: cleanEmail === 'admin@jazyalon.cl'
+        isPrimary: cleanEmail === PRIMARY_ADMIN_EMAIL
       };
 
       setAdminEmails((prev) => {
@@ -1180,7 +1293,22 @@ export const ShopProvider = ({ children }) => {
         return sanitizeAdminEmailsList([...filtered, addedEntry]);
       });
 
-      // Sincronizar con la lista de usuarios sin duplicar registros
+      // Primero autorizar correo en admin_authorized_emails (para que el trigger handle_new_auth_user asigne rol admin)
+      syncAdminEmailToDb({
+        email: cleanEmail,
+        displayName: cleanDisplayName,
+        addedBy: currentUser?.email || PRIMARY_ADMIN_EMAIL
+      }).then(() => {
+        if (initialPassword) {
+          createSecondaryAdminAccountInCloud({
+            name: cleanDisplayName,
+            email: cleanEmail,
+            password: initialPassword
+          });
+        }
+      });
+
+      // Sincronizar con la lista local de usuarios sin duplicar registros
       setUsers((prevUsers) => {
         const existingIdx = prevUsers.findIndex((u) => normalizeEmail(u.email) === cleanEmail);
         if (existingIdx !== -1) {
@@ -1197,7 +1325,6 @@ export const ShopProvider = ({ children }) => {
           });
         }
 
-        // Si se indicó contraseña inicial, crear la cuenta lista para entrar de inmediato
         if (initialPassword) {
           const newAdminAccount = {
             id: `usr-adm-${Date.now()}`,
@@ -1211,11 +1338,6 @@ export const ShopProvider = ({ children }) => {
             comuna: '',
             createdAt: new Date().toISOString()
           };
-          registerUserInCloud({
-            name: cleanDisplayName,
-            email: cleanEmail,
-            password: initialPassword
-          });
           return [...prevUsers, newAdminAccount];
         }
 
@@ -1226,15 +1348,9 @@ export const ShopProvider = ({ children }) => {
         setCurrentUser((prev) => (prev ? { ...prev, role: 'admin' } : prev));
       }
 
-      syncAdminEmailToDb({
-        email: cleanEmail,
-        displayName: cleanDisplayName,
-        addedBy: currentUser?.email || 'admin@jazyalon.cl'
-      });
-
       logSecurityEvent('ADMIN_EMAIL_AUTHORIZED', {
         email: cleanEmail,
-        by: currentUser?.email || 'admin'
+        by: currentUser?.email || PRIMARY_ADMIN_EMAIL
       });
 
       showToast(`Acceso de administración habilitado para ${cleanEmail} ✦`);
@@ -1247,8 +1363,8 @@ export const ShopProvider = ({ children }) => {
   const revokeAdminEmail = useCallback(
     (emailToRevoke) => {
       const cleanEmail = normalizeEmail(emailToRevoke);
-      if (cleanEmail === 'admin@jazyalon.cl') {
-        showToast('El correo principal de administración no puede ser eliminado.', 'error');
+      if (cleanEmail === PRIMARY_ADMIN_EMAIL) {
+        showToast('El correo principal de Jazz no puede ser eliminado.', 'error');
         return { success: false };
       }
       if (adminEmails.length <= 1) {
@@ -1270,7 +1386,7 @@ export const ShopProvider = ({ children }) => {
       removeAdminEmailFromDb(cleanEmail);
       logSecurityEvent('ADMIN_EMAIL_REVOKED', {
         email: cleanEmail,
-        by: currentUser?.email || 'admin'
+        by: currentUser?.email || PRIMARY_ADMIN_EMAIL
       });
 
       showToast(`Acceso administrativo revocado para ${cleanEmail}`, 'info');
@@ -1280,19 +1396,23 @@ export const ShopProvider = ({ children }) => {
     [adminEmails.length, currentUser, showToast, broadcastSync]
   );
 
-  // --- CRUD OPERATIONS (Admin-ready & Live Real-Time) ---
+  // --- CRUD OPERATIONS (Admin-ready & Live Real-Time + Supabase Cloud Sync) ---
 
   const addProduct = (newProduct) => {
     const normalized = normalizeStoreProduct(newProduct, categories);
     ensureCategoryExists(normalized.category, normalized.categoryName);
 
     setProducts((prev) => [normalized, ...prev]);
+    syncProductToDb(normalized);
 
     if (normalized.isCollectionPrimary && normalized.collection) {
       setCollections((prev) =>
-        prev.map((col) =>
-          col.id === normalized.collection ? { ...col, primaryProductId: normalized.id } : col
-        )
+        prev.map((col) => {
+          if (col.id !== normalized.collection) return col;
+          const updatedCol = { ...col, primaryProductId: normalized.id };
+          syncCollectionToDb(updatedCol);
+          return updatedCol;
+        })
       );
     }
 
@@ -1309,6 +1429,7 @@ export const ShopProvider = ({ children }) => {
       ensureCategoryExists(item.category, item.categoryName);
     });
     setProducts((prev) => [...normalizedList, ...prev]);
+    syncMultipleProductsToDb(normalizedList);
     showToast(`¡${normalizedList.length} prendas publicadas en el catálogo! ✦`);
     broadcastSync();
     return normalizedList;
@@ -1348,11 +1469,15 @@ export const ShopProvider = ({ children }) => {
         if (p.id !== id) return p;
         const merged = mergedPreview || normalizeStoreProduct({ ...p, ...updatedFields }, categories);
         ensureCategoryExists(merged.category, merged.categoryName);
+        syncProductToDb(merged);
         if (merged.isCollectionPrimary && merged.collection) {
           setCollections((cols) =>
-            cols.map((col) =>
-              col.id === merged.collection ? { ...col, primaryProductId: merged.id } : col
-            )
+            cols.map((col) => {
+              if (col.id !== merged.collection) return col;
+              const updatedCol = { ...col, primaryProductId: merged.id };
+              syncCollectionToDb(updatedCol);
+              return updatedCol;
+            })
           );
         }
         return merged;
@@ -1403,6 +1528,7 @@ export const ShopProvider = ({ children }) => {
 
   const deleteProduct = (id) => {
     setProducts((prev) => prev.filter((p) => p.id !== id));
+    removeProductFromDb(id);
     showToast('Prenda eliminada del catálogo', 'info');
     broadcastSync();
   };
@@ -1410,11 +1536,12 @@ export const ShopProvider = ({ children }) => {
   // Guardado en lote para "Destacados — Nuevos Ingresos" (Botón Guardar cambios en Inicio)
   const saveFeaturedDropsChanges = (orderedDropIds) => {
     const cleanIds = Array.isArray(orderedDropIds) ? orderedDropIds : [];
+    const changedRows = [];
     setProducts((prev) =>
       prev.map((p) => {
         const orderIdx = cleanIds.indexOf(p.id);
         if (orderIdx !== -1) {
-          return {
+          const updated = {
             ...p,
             isNew: true,
             isFeatured: true,
@@ -1422,18 +1549,25 @@ export const ShopProvider = ({ children }) => {
             dropOrder: orderIdx + 1,
             badge: p.badge || 'NUEVO DROP'
           };
+          changedRows.push(updated);
+          return updated;
         }
         if (p.isNew) {
-          return {
+          const updated = {
             ...p,
             isNew: false,
             dropOrder: 99,
             badge: p.badge === 'NUEVO DROP' ? '' : p.badge
           };
+          changedRows.push(updated);
+          return updated;
         }
         return p;
       })
     );
+    if (changedRows.length > 0) {
+      syncMultipleProductsToDb(changedRows);
+    }
     showToast('Cambios en Destacados guardados en la tienda ✦');
     broadcastSync();
   };
@@ -1462,21 +1596,29 @@ export const ShopProvider = ({ children }) => {
     setCollections((prev) =>
       prev.map((col) => {
         if (col.id !== collectionId) return col;
-        return {
+        const updatedCol = {
           ...col,
           primaryProductId: productId,
           image: targetProduct?.images?.[0] || targetProduct?.image_url || col.image
         };
+        syncCollectionToDb(updatedCol);
+        return updatedCol;
       })
     );
+    const affectedProducts = [];
     setProducts((prev) =>
       prev.map((p) => {
         if (p.collection === collectionId) {
-          return { ...p, isCollectionPrimary: p.id === productId };
+          const updatedProd = { ...p, isCollectionPrimary: p.id === productId };
+          affectedProducts.push(updatedProd);
+          return updatedProd;
         }
         return p;
       })
     );
+    if (affectedProducts.length > 0) {
+      syncMultipleProductsToDb(affectedProducts);
+    }
     showToast('Corset principal actualizado para la colección ✦');
     broadcastSync();
   };
@@ -1492,13 +1634,21 @@ export const ShopProvider = ({ children }) => {
       if (prev.some((c) => c.id === cat.id)) return prev;
       return [...prev, cat];
     });
+    syncCategoryToDb(cat);
     showToast(`Categoría "${cat.name}" añadida y sincronizada ✦`);
     broadcastSync();
     return cat;
   };
 
   const updateCategory = (id, updatedFields) => {
-    setCategories((prev) => prev.map((c) => (c.id === id ? { ...c, ...updatedFields } : c)));
+    setCategories((prev) =>
+      prev.map((c) => {
+        if (c.id !== id) return c;
+        const merged = { ...c, ...updatedFields };
+        syncCategoryToDb(merged);
+        return merged;
+      })
+    );
     if (updatedFields.name) {
       setProducts((prev) =>
         prev.map((p) => (p.category === id ? { ...p, categoryName: updatedFields.name } : p))
@@ -1511,6 +1661,7 @@ export const ShopProvider = ({ children }) => {
   const deleteCategory = (id) => {
     if (id === 'all') return;
     setCategories((prev) => prev.filter((c) => c.id !== id));
+    removeCategoryFromDb(id);
     showToast('Categoría eliminada', 'info');
     broadcastSync();
   };
@@ -1528,10 +1679,18 @@ export const ShopProvider = ({ children }) => {
     };
     setCollections((prev) => {
       const base = col.isPrimaryFeatured
-        ? prev.map((c) => ({ ...c, isPrimaryFeatured: false }))
+        ? prev.map((c) => {
+            if (c.isPrimaryFeatured) {
+              const demoted = { ...c, isPrimaryFeatured: false };
+              syncCollectionToDb(demoted);
+              return demoted;
+            }
+            return c;
+          })
         : prev;
       return [...base, col];
     });
+    syncCollectionToDb(col);
 
     // Notificación automática a suscritas cuando se publica una nueva colección
     const bConf = siteSettings?.benefitsConfig || DEFAULT_BENEFITS_CONFIG;
@@ -1554,9 +1713,19 @@ export const ShopProvider = ({ children }) => {
     setCollections((prev) =>
       prev.map((c) => {
         if (updatedFields.isPrimaryFeatured && c.id !== id) {
-          return { ...c, isPrimaryFeatured: false };
+          if (c.isPrimaryFeatured) {
+            const demoted = { ...c, isPrimaryFeatured: false };
+            syncCollectionToDb(demoted);
+            return demoted;
+          }
+          return c;
         }
-        return c.id === id ? { ...c, ...updatedFields } : c;
+        if (c.id === id) {
+          const merged = { ...c, ...updatedFields };
+          syncCollectionToDb(merged);
+          return merged;
+        }
+        return c;
       })
     );
     showToast('Colección actualizada en tiempo real ✦');
@@ -1565,12 +1734,17 @@ export const ShopProvider = ({ children }) => {
 
   const deleteCollection = (id) => {
     setCollections((prev) => prev.filter((c) => c.id !== id));
+    removeCollectionFromDb(id);
     showToast('Colección eliminada', 'info');
     broadcastSync();
   };
 
   const updateHeroSlide = (id, updatedFields) => {
-    setHeroSlides((prev) => prev.map((s) => (s.id === id ? { ...s, ...updatedFields } : s)));
+    setHeroSlides((prev) => {
+      const next = prev.map((s) => (s.id === id ? { ...s, ...updatedFields } : s));
+      syncHeroSlidesToDb(next);
+      return next;
+    });
     showToast('Carrusel actualizado ✦');
     broadcastSync();
   };
@@ -1581,12 +1755,26 @@ export const ShopProvider = ({ children }) => {
     setCategories(CATEGORIES);
     setCollections(COLLECTIONS);
     setHeroSlides(HERO_SLIDES);
-    setOrders(INITIAL_ORDERS);
+    if (!isSupabaseConfigured()) {
+      setOrders(INITIAL_ORDERS);
+      localStorage.removeItem(STORAGE_KEYS.ORDERS);
+    }
     localStorage.removeItem(STORAGE_KEYS.PRODUCTS);
     localStorage.removeItem(STORAGE_KEYS.CATEGORIES);
     localStorage.removeItem(STORAGE_KEYS.COLLECTIONS);
     localStorage.removeItem(STORAGE_KEYS.HERO_SLIDES);
-    localStorage.removeItem(STORAGE_KEYS.ORDERS);
+
+    if (isSupabaseConfigured()) {
+      CATEGORIES.filter((c) => c.id !== 'all').forEach((cat, idx) =>
+        syncCategoryToDb({ ...cat, display_order: idx + 1 })
+      );
+      COLLECTIONS.forEach((col, idx) =>
+        syncCollectionToDb({ ...col, display_order: idx + 1 })
+      );
+      syncMultipleProductsToDb(defaultProds);
+      syncHeroSlidesToDb(HERO_SLIDES);
+    }
+
     showToast('Catálogo y tienda restablecidos a los diseños originales ✦');
     broadcastSync();
   };
@@ -1604,12 +1792,148 @@ export const ShopProvider = ({ children }) => {
     return currentUser.role === 'admin' || adminEmailSet.has(clean);
   }, [currentUser, adminEmailSet]);
 
-  const loginUser = (email, password) => {
+  // Cargar datos protegidos por RLS (Pedidos propios/globales, Suscriptoras, Correos Admin y Alertas de Stock) cuando cambia la sesión
+  useEffect(() => {
+    if (!isSupabaseConfigured() || !currentUser?.email) return;
+    let active = true;
+
+    (async () => {
+      try {
+        // 1. Cargar órdenes permitidas por RLS (propias para clientas, todas para Jazz/Admin)
+        const { data: cloudOrders } = await supabase
+          .from('orders')
+          .select('*, order_items(*)')
+          .order('created_at', { ascending: false });
+
+        if (active && Array.isArray(cloudOrders)) {
+          setOrders(cloudOrders.map(mapDbOrderToStoreOrder));
+        }
+
+        // 2. Verificar si el correo autenticado está suscrito en la nube (para validar cupones como antonella10)
+        const { data: isSubbed } = await supabase.rpc('check_subscription_status', {
+          p_email: normalizeEmail(currentUser.email)
+        });
+        if (active && isSubbed) {
+          const clean = normalizeEmail(currentUser.email);
+          setSubscribers((prev) => {
+            if (prev.some((s) => s.email === clean)) return prev;
+            return sanitizeSubscribersList([
+              {
+                email: clean,
+                notifyPriceDrop: true,
+                notifyNewCollection: true,
+                notifyLowStock: true,
+                isActive: true,
+                subscribedAt: new Date().toISOString()
+              },
+              ...prev
+            ]);
+          });
+        }
+
+        // 3. Si es Administradora (Jazz), cargar correos autorizados, lista de suscriptoras y alertas de reposición
+        if (isAdmin) {
+          const [{ data: cloudAdmins }, { data: cloudSubs }, { data: cloudAlerts }] =
+            await Promise.all([
+              supabase
+                .from('admin_authorized_emails')
+                .select('email, display_name, is_primary, added_by, created_at'),
+              supabase.from('newsletter_subscribers').select('*'),
+              supabase
+                .from('stock_alerts')
+                .select('*')
+                .eq('resolved', false)
+                .order('created_at', { ascending: false })
+            ]);
+
+          if (!active) return;
+
+          if (Array.isArray(cloudAdmins) && cloudAdmins.length > 0) {
+            setAdminEmails(
+              sanitizeAdminEmailsList(
+                cloudAdmins.map((row) => ({
+                  email: row.email,
+                  name: row.display_name || (row.email === PRIMARY_ADMIN_EMAIL ? 'Jazz' : 'Acceso Admin'),
+                  addedBy: row.added_by || 'Supabase',
+                  addedAt: row.created_at,
+                  isPrimary: Boolean(row.is_primary) || row.email === PRIMARY_ADMIN_EMAIL
+                }))
+              )
+            );
+          }
+
+          if (Array.isArray(cloudSubs)) {
+            setSubscribers(
+              sanitizeSubscribersList(
+                cloudSubs.map((row) => ({
+                  email: row.email,
+                  notifyPriceDrop: row.notify_price_drop,
+                  notifyNewCollection: row.notify_new_collection,
+                  notifyLowStock: row.notify_low_stock,
+                  isActive: row.is_active,
+                  subscribedAt: row.subscribed_at
+                }))
+              )
+            );
+          }
+
+          if (Array.isArray(cloudAlerts)) {
+            const formattedAlerts = cloudAlerts.map((a) => ({
+              id: a.id,
+              email: a.email,
+              productId: a.product_id,
+              productName: a.product_name,
+              color: a.color,
+              size: a.size,
+              createdAt: a.created_at
+            }));
+            localStorage.setItem('jazyalon_stock_alerts', JSON.stringify(formattedAlerts));
+            window.dispatchEvent(new Event('jazyalon-alerts-updated'));
+          }
+        }
+      } catch {
+        // Fallback silencioso si la red falla temporalmente
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [currentUser?.id, currentUser?.email, isAdmin]);
+
+  const loginUser = async (email, password) => {
     const cleanEmail = normalizeEmail(email);
     if (!validateEmail(cleanEmail)) {
       return { success: false, message: 'Por favor ingresa un correo electrónico válido.' };
     }
 
+    // Modo Nube (Supabase Auth + RLS)
+    if (isSupabaseConfigured()) {
+      const cloudRes = await signInWithCloud({ email: cleanEmail, password });
+      if (!cloudRes.success || !cloudRes.user) {
+        return {
+          success: false,
+          message:
+            cloudRes.message ||
+            'Correo o contraseña incorrectos. Verifica tus datos e inténtalo nuevamente.'
+        };
+      }
+
+      const resolvedRole =
+        cloudRes.user.role === 'admin' || adminEmailSet.has(cleanEmail) ? 'admin' : 'customer';
+      const safeUser = stripSensitiveUserFields({ ...cloudRes.user, role: resolvedRole });
+
+      setCurrentUser(safeUser);
+      showToast(
+        resolvedRole === 'admin'
+          ? `Hola, ${safeUser.name} — Bienvenida al Panel de Administración ✦`
+          : `Bienvenida a tu cuenta JAZYALON, ${safeUser.name}`
+      );
+      broadcastSync();
+      return { success: true, user: safeUser };
+    }
+
+    // Modo Local (Respaldo con digest criptográfico)
     const expectedDigest = computePasswordDigest(password, cleanEmail);
     const found = users.find(
       (u) => normalizeEmail(u.email) === cleanEmail && u.passwordDigest === expectedDigest
@@ -1629,14 +1953,14 @@ export const ShopProvider = ({ children }) => {
     setCurrentUser(safeUser);
     showToast(
       resolvedRole === 'admin'
-        ? `Bienvenida al Panel de Administración, ${safeUser.name} ✦`
+        ? `Hola, ${safeUser.name} — Bienvenida al Panel de Administración ✦`
         : `Bienvenida a tu cuenta JAZYALON, ${safeUser.name}`
     );
     broadcastSync();
     return { success: true, user: safeUser };
   };
 
-  const registerUser = ({ name, email, password, phone = '', rut = '' }) => {
+  const registerUser = async ({ name, email, password, phone = '', rut = '' }) => {
     const cleanEmail = normalizeEmail(email);
     const cleanName = sanitizeName(name);
     const cleanPhone = sanitizePhone(phone);
@@ -1653,6 +1977,61 @@ export const ShopProvider = ({ children }) => {
     }
     if (cleanRut && !validateRUT(cleanRut)) {
       return { success: false, message: 'El RUT ingresado no es válido.' };
+    }
+
+    if (isSupabaseConfigured()) {
+      const cloudReg = await registerUserInCloud({
+        name: cleanName,
+        email: cleanEmail,
+        password,
+        phone: cleanPhone,
+        rut: cleanRut
+      });
+
+      if (!cloudReg.synced) {
+        return {
+          success: false,
+          message:
+            cloudReg.message ||
+            'No se pudo registrar la cuenta. Verifica si el correo ya existe.'
+        };
+      }
+
+      const assignedRole =
+        cloudReg.cloudUser?.role === 'admin' || adminEmailSet.has(cleanEmail)
+          ? 'admin'
+          : 'customer';
+
+      const safeCloudUser = stripSensitiveUserFields(
+        cloudReg.cloudUser || {
+          id: cloudReg.authUser?.id || `usr-${Date.now()}`,
+          name: cleanName,
+          email: cleanEmail,
+          role: assignedRole,
+          phone: cleanPhone,
+          rut: cleanRut,
+          address: '',
+          comuna: '',
+          createdAt: new Date().toISOString()
+        }
+      );
+
+      if (cloudReg.hasSession) {
+        setCurrentUser(safeCloudUser);
+        showToast(
+          assignedRole === 'admin'
+            ? `Cuenta creada con acceso Administrador para ${safeCloudUser.name} ✦`
+            : `Cuenta creada con éxito. Bienvenida, ${safeCloudUser.name}`
+        );
+      } else {
+        showToast(
+          'Cuenta registrada con éxito. Revisa tu correo para confirmar o inicia sesión.',
+          'info'
+        );
+      }
+
+      broadcastSync();
+      return { success: true, user: safeCloudUser, requiresEmailConfirm: !cloudReg.hasSession };
     }
 
     const exists = users.some((u) => normalizeEmail(u.email) === cleanEmail);
@@ -1679,15 +2058,6 @@ export const ShopProvider = ({ children }) => {
     };
 
     setUsers((prev) => [...prev, newUser]);
-
-    // Sincronizar con Supabase Auth + tabla profiles si está configurado
-    registerUserInCloud({
-      name: cleanName,
-      email: cleanEmail,
-      password,
-      phone: cleanPhone,
-      rut: cleanRut
-    });
 
     const safeUser = stripSensitiveUserFields(newUser);
     setCurrentUser(safeUser);
@@ -1720,12 +2090,19 @@ export const ShopProvider = ({ children }) => {
       return { success: false, message: 'El RUT ingresado no es válido.' };
     }
 
-    let updatedSafeUser = null;
+    const updatedSafeUser = stripSensitiveUserFields({
+      ...currentUser,
+      name: nextName,
+      phone: nextPhone,
+      rut: nextRut,
+      address: nextAddress,
+      comuna: nextComuna
+    });
 
     setUsers((prev) =>
       prev.map((u) => {
         if (normalizeEmail(u.email) !== cleanEmail) return u;
-        const merged = {
+        return {
           ...u,
           name: nextName,
           phone: nextPhone,
@@ -1733,22 +2110,22 @@ export const ShopProvider = ({ children }) => {
           address: nextAddress,
           comuna: nextComuna
         };
-        updatedSafeUser = stripSensitiveUserFields(merged);
-        return merged;
       })
     );
 
-    if (updatedSafeUser) {
-      setCurrentUser(updatedSafeUser);
-      syncProfileUpdateToDb(updatedSafeUser);
-    }
+    setCurrentUser(updatedSafeUser);
+    syncProfileUpdateToDb(updatedSafeUser);
 
     showToast('Datos de tu cuenta guardados correctamente ✦');
     broadcastSync();
     return { success: true, user: updatedSafeUser };
   };
 
-  const quickAdminLogin = () => {
+  const quickAdminLogin = async () => {
+    if (isSupabaseConfigured()) {
+      const res = await loginUser(PRIMARY_ADMIN_EMAIL, 'Jazyalon2026!Admin');
+      if (res?.success) return res.user;
+    }
     const adminUser = users.find((u) => u.role === 'admin') || DEFAULT_USERS[0];
     const resolvedAdminName =
       !adminUser.name || adminUser.name.toLowerCase().includes('administrador')
@@ -1756,6 +2133,7 @@ export const ShopProvider = ({ children }) => {
         : adminUser.name;
     const safeAdmin = stripSensitiveUserFields({
       ...adminUser,
+      email: adminUser.email || PRIMARY_ADMIN_EMAIL,
       name: resolvedAdminName,
       role: 'admin'
     });
@@ -1766,8 +2144,12 @@ export const ShopProvider = ({ children }) => {
   };
 
   const logoutUser = () => {
+    signOutFromCloud();
     setCurrentUser(null);
     setAdminPreviewMaintenance(false);
+    if (isSupabaseConfigured()) {
+      setOrders([]);
+    }
     showToast('Has cerrado tu sesión correctamente', 'info');
     broadcastSync();
   };
@@ -1782,6 +2164,10 @@ export const ShopProvider = ({ children }) => {
       hour: '2-digit',
       minute: '2-digit'
     });
+    const resolvedCouponCode = orderInput.couponCode || appliedCoupon || null;
+    const resolvedDiscountAmount = Number(orderInput.discountAmount ?? discountAmount) || 0;
+    const resolvedShippingCost = Number(orderInput.shippingCost ?? shippingCost) || 0;
+
     const newOrder = {
       id: `ord-${Date.now()}`,
       orderNumber:
@@ -1796,6 +2182,9 @@ export const ShopProvider = ({ children }) => {
       comuna: sanitizeInput(orderInput.comuna || currentUser?.comuna || '', 100),
       regionName: sanitizeInput(orderInput.regionName || currentRegion.name, 100),
       carrier: sanitizeInput(orderInput.shippingCarrier || 'starken', 40),
+      shippingCost: resolvedShippingCost,
+      couponCode: resolvedCouponCode,
+      discountAmount: resolvedDiscountAmount,
       trackingCode: `TRK-${Math.floor(10000000 + Math.random() * 90000000)}`,
       paymentMethod: sanitizeInput(orderInput.paymentMethod || 'webpay', 40),
       status: 'recibido',
@@ -1827,9 +2216,9 @@ export const ShopProvider = ({ children }) => {
     };
 
     setOrders((prev) => [newOrder, ...prev]);
-    syncOrderToDb(newOrder);
+    createOrderInDb(newOrder);
 
-    // Descontar unidades compradas y disparar notificación automática si alguna prenda queda con pocas unidades
+    // Descontar unidades compradas localmente (en Supabase lo ejecuta de forma atómica el trigger trg_deduct_stock_on_order_item)
     if (!orderInput.skipStockDeduction) {
       const bConf = siteSettings?.benefitsConfig || DEFAULT_BENEFITS_CONFIG;
       const lowThreshold = Number(bConf.lowStockThreshold || 3);
@@ -1861,14 +2250,12 @@ export const ShopProvider = ({ children }) => {
       });
     }
 
-    // Si se utilizó un cupón promocional, contabilizar uso y limpiar estado del carrito
+    // Si se utilizó un cupón promocional, contabilizar uso en estado local (en Supabase lo incrementa trg_increment_coupon_usage)
     if (appliedCoupon) {
       setCoupons((prev) =>
         prev.map((c) => {
           if (c.code !== appliedCoupon) return c;
-          const updated = { ...c, usedCount: (Number(c.usedCount) || 0) + 1 };
-          syncCouponToDb(updated);
-          return updated;
+          return { ...c, usedCount: (Number(c.usedCount) || 0) + 1 };
         })
       );
       setDiscountPercent(0);
@@ -1907,7 +2294,7 @@ export const ShopProvider = ({ children }) => {
             }
           ]
         };
-        syncOrderToDb(updatedOrder);
+        updateOrderInDb(updatedOrder);
         return updatedOrder;
       })
     );
@@ -1933,17 +2320,28 @@ export const ShopProvider = ({ children }) => {
       prev.map((o) => {
         if (o.id !== orderId && o.orderNumber !== orderId) return o;
         const nextAuto = !o.autoMode;
+        const updated = { ...o, autoMode: nextAuto };
+        updateOrderInDb(updated);
         showToast(
           nextAuto
             ? `Seguimiento automático activado para ${o.orderNumber} ✦`
             : `Seguimiento cambiado a modo manual para ${o.orderNumber}`,
           'info'
         );
-        return { ...o, autoMode: nextAuto };
+        return updated;
       })
     );
     broadcastSync();
   };
+
+  const trackOrderByCode = useCallback(async (lookupCode) => {
+    const clean = String(lookupCode || '').trim();
+    if (!clean) return null;
+    if (isSupabaseConfigured()) {
+      return await trackOrderInCloud(clean);
+    }
+    return null;
+  }, []);
 
   // Cart operations (with exact chosen size & color tracking)
   const addToCart = (product, size = null, color = null, quantity = 1) => {
@@ -2266,6 +2664,7 @@ export const ShopProvider = ({ children }) => {
         updateOrderStatus,
         advanceOrderStep,
         toggleOrderAutoMode,
+        trackOrderByCode,
 
         // Cart
         cart,

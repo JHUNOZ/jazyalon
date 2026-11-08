@@ -10,7 +10,11 @@ import {
   Gift, Tag, Percent, AlertTriangle
 } from 'lucide-react';
 import { useShop } from '../../context/ShopContext';
-import { supabase } from '../../lib/supabase';
+import {
+  supabase,
+  uploadOptimizedImageToCloud,
+  resolveStockAlertInDb
+} from '../../lib/supabase';
 import HoneCatalog from './HoneCatalog';
 import { convertFileToWebP } from '../../utils/webpConverter';
 import styles from './AdminPanelView.module.css';
@@ -188,6 +192,7 @@ export default function AdminPanelView({ onClose, setCurrentView }) {
     const updated = stockAlerts.filter((a, idx) => (a.id || idx) !== alertId);
     setStockAlerts(updated);
     localStorage.setItem('jazyalon_stock_alerts', JSON.stringify(updated));
+    resolveStockAlertInDb(alertId);
     if (showToast) showToast('Aviso de reposición marcado como atendido ✦');
   };
 
@@ -371,7 +376,13 @@ export default function AdminPanelView({ onClose, setCurrentView }) {
     setUploadingSlideId(slideId);
     try {
       const converted = await convertFileToWebP(file, { quality: 0.86, maxWidth: 1800 });
-      handleDraftSlideField(slideId, { image: converted.dataUrl });
+      const finalUrl = await uploadOptimizedImageToCloud(
+        converted.webpFile,
+        'slides',
+        converted.fileName,
+        converted.dataUrl
+      );
+      handleDraftSlideField(slideId, { image: finalUrl });
       if (showToast) showToast('Imagen cargada en el carrusel. Presiona "Guardar cambios" para publicar.');
     } catch (err) {
       console.error(err);
@@ -1007,7 +1018,13 @@ export default function AdminPanelView({ onClose, setCurrentView }) {
     setUploadingQuickColImg(true);
     try {
       const converted = await convertFileToWebP(file, { quality: 0.86, maxWidth: 1600 });
-      setQuickColImage(converted.dataUrl);
+      const finalUrl = await uploadOptimizedImageToCloud(
+        converted.webpFile,
+        'collections',
+        converted.fileName,
+        converted.dataUrl
+      );
+      setQuickColImage(finalUrl);
       if (showToast) showToast('Imagen de portada cargada y optimizada ✦');
     } catch (err) {
       console.error(err);
@@ -1037,7 +1054,13 @@ export default function AdminPanelView({ onClose, setCurrentView }) {
     setUploadingColModalImg(true);
     try {
       const converted = await convertFileToWebP(file, { quality: 0.86, maxWidth: 1600 });
-      setColEditForm((prev) => ({ ...prev, coverImage: converted.dataUrl }));
+      const finalUrl = await uploadOptimizedImageToCloud(
+        converted.webpFile,
+        'collections',
+        converted.fileName,
+        converted.dataUrl
+      );
+      setColEditForm((prev) => ({ ...prev, coverImage: finalUrl }));
       if (showToast) showToast('Nueva foto de portada lista para guardar ✦');
     } catch (err) {
       console.error(err);
@@ -1297,7 +1320,13 @@ export default function AdminPanelView({ onClose, setCurrentView }) {
       const uploaded = [];
       for (const file of files) {
         const converted = await convertFileToWebP(file, { quality: 0.86, maxWidth: 1500 });
-        uploaded.push(converted.dataUrl);
+        const finalUrl = await uploadOptimizedImageToCloud(
+          converted.webpFile,
+          'products',
+          converted.fileName,
+          converted.dataUrl
+        );
+        uploaded.push(finalUrl);
       }
       setColProdForm((prev) => {
         const nextImages = [...prev.images, ...uploaded];
@@ -1447,6 +1476,9 @@ export default function AdminPanelView({ onClose, setCurrentView }) {
       phone: manualOrderForm.customerPhone.trim(),
       comuna: manualOrderForm.comuna.trim(),
       shippingCarrier: manualOrderForm.carrier,
+      shippingCost: 0,
+      discountAmount: 0,
+      couponCode: null,
       paymentMethod: manualOrderForm.paymentMethod,
       total,
       items: [
@@ -1788,7 +1820,7 @@ export default function AdminPanelView({ onClose, setCurrentView }) {
                 required
                 value={gateEmail}
                 onChange={(e) => setGateEmail(e.target.value)}
-                placeholder="admin@jazyalon.cl"
+                placeholder="jazz@jazyalon.cl"
                 className={styles.adminInput}
                 style={{ width: '100%' }}
               />
@@ -2052,7 +2084,7 @@ export default function AdminPanelView({ onClose, setCurrentView }) {
             </div>
             <div className={styles.adminInfo}>
               <span className={styles.adminName}>Hola, {adminDisplayName.split(' ')[0]}</span>
-              <span className={styles.adminEmail}>{currentUser?.email || 'admin@jazyalon.cl'}</span>
+              <span className={styles.adminEmail}>{currentUser?.email || 'jazz@jazyalon.cl'}</span>
             </div>
           </div>
 
@@ -4552,7 +4584,7 @@ export default function AdminPanelView({ onClose, setCurrentView }) {
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '280px', overflowY: 'auto' }}>
                     {adminEmails.map((entry) => {
                       const isPrimary =
-                        entry.isPrimary || entry.email.toLowerCase() === 'admin@jazyalon.cl';
+                        entry.isPrimary || entry.email.toLowerCase() === 'jazz@jazyalon.cl';
                       const cleanEntryName =
                         isPrimary && (!entry.name || entry.name.toLowerCase().includes('administrador'))
                           ? 'Jazz'

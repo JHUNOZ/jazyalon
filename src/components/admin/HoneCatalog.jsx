@@ -1,6 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { createClient } from '@supabase/supabase-js';
 import styles from './HoneCatalog.module.css';
+import {
+  supabase as sharedSupabase,
+  uploadOptimizedImageToCloud,
+  mapProductToDbRow,
+  mapDbRowToProduct
+} from '../../lib/supabase';
 import { generateUniqueSKU } from './skuGenerator';
 import {
   formatCLP,
@@ -62,24 +67,8 @@ import {
   FolderPlus
 } from 'lucide-react';
 
-// Safe fallback Supabase client (compatible with Vite & Next.js)
-const getEnv = (key) => {
-  try {
-    if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env[key]) {
-      return import.meta.env[key];
-    }
-  } catch {}
-  try {
-    if (typeof process !== 'undefined' && process.env && process.env[key]) {
-      return process.env[key];
-    }
-  } catch {}
-  return '';
-};
-
-const defaultSupabaseUrl = getEnv('VITE_SUPABASE_URL') || getEnv('NEXT_PUBLIC_SUPABASE_URL') || 'https://placeholder.supabase.co';
-const defaultSupabaseKey = getEnv('VITE_SUPABASE_ANON_KEY') || getEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY') || 'placeholder';
-const defaultSupabase = createClient(defaultSupabaseUrl, defaultSupabaseKey);
+// Reuse hardened singleton Supabase client to prevent duplicate GoTrueClient instances
+const defaultSupabase = sharedSupabase;
 
 const CORSET_COLOR_PRESETS = [
   { name: 'Negro', hex: '#111111' },
@@ -287,7 +276,7 @@ export default function HoneCatalog({
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setLocalProducts(data || []);
+      setLocalProducts((data || []).map(mapDbRowToProduct));
     } catch (err) {
       console.error('Error fetching products:', err);
     } finally {
@@ -531,7 +520,13 @@ export default function HoneCatalog({
     try {
       setUploading(true);
       const converted = await convertImageFileToWebP(file);
-      handleUpdateColorField(colorIdx, 'image', converted.dataUrl);
+      const finalUrl = await uploadOptimizedImageToCloud(
+        converted.webpFile,
+        'products',
+        converted.fileName,
+        converted.dataUrl
+      );
+      handleUpdateColorField(colorIdx, 'image', finalUrl);
       setLastWebpStats(converted);
       showToast('Foto de color cargada y optimizada ✦');
     } catch (err) {
@@ -721,30 +716,13 @@ export default function HoneCatalog({
 
       for (let i = 0; i < convertedResults.length; i++) {
         const item = convertedResults[i];
-        if (isStoreConnected) {
-          uploadedUrls.push(item.dataUrl);
-        } else {
-          // Try Supabase Storage with the converted .webp File; fallback to DataURL if offline/local
-          const fileName = `prod_${Date.now()}_${i}_${item.fileName}`;
-          const filePath = `products/${fileName}`;
-          try {
-            const { error: uploadError } = await supabase.storage
-              .from('admin_uploads')
-              .upload(filePath, item.webpFile, {
-                contentType: 'image/webp',
-                cacheControl: '3600',
-                upsert: true
-              });
-            if (!uploadError) {
-              const { data } = supabase.storage.from('admin_uploads').getPublicUrl(filePath);
-              uploadedUrls.push(data?.publicUrl || item.dataUrl);
-            } else {
-              uploadedUrls.push(item.dataUrl);
-            }
-          } catch {
-            uploadedUrls.push(item.dataUrl);
-          }
-        }
+        const finalUrl = await uploadOptimizedImageToCloud(
+          item.webpFile,
+          'products',
+          item.fileName,
+          item.dataUrl
+        );
+        uploadedUrls.push(finalUrl);
       }
 
       if (convertedResults.length > 0) {
@@ -901,12 +879,15 @@ export default function HoneCatalog({
           showToast('Prenda creada y publicada en el sitio web ✦');
         }
       } else {
+        const dbRow = mapProductToDbRow(
+          editingId ? { ...payload, id: editingId } : { ...payload, id: `prod-${Date.now()}` }
+        );
         if (editingId) {
-          const { error } = await supabase.from('products').update(payload).eq('id', editingId);
+          const { error } = await supabase.from('products').update(dbRow).eq('id', editingId);
           if (error) throw error;
           showToast('Producto actualizado exitosamente');
         } else {
-          const { error } = await supabase.from('products').insert([payload]);
+          const { error } = await supabase.from('products').insert([dbRow]);
           if (error) throw error;
           showToast('Producto creado y publicado en catálogo');
         }
@@ -994,20 +975,12 @@ export default function HoneCatalog({
       const row = bulkFiles[i];
       setBulkFiles(prev => prev.map((r, idx) => (idx === i ? { ...r, status: 'uploading' } : r)));
 
-      let publicUrl = row.preview;
-
-      if (!isStoreConnected) {
-        try {
-          const filePath = `products/bulk_${Date.now()}_${i}_${row.webpFileName}`;
-          const { error: uploadError } = await supabase.storage
-            .from('admin_uploads')
-            .upload(filePath, row.file, { contentType: 'image/webp', cacheControl: '3600', upsert: true });
-          if (!uploadError) {
-            const { data } = supabase.storage.from('admin_uploads').getPublicUrl(filePath);
-            if (data?.publicUrl) publicUrl = data.publicUrl;
-          }
-        } catch {}
-      }
+      const publicUrl = await uploadOptimizedImageToCloud(
+        row.file,
+        'products',
+        row.webpFileName,
+        row.preview
+      );
 
       const productPayload = {
         name: row.name.trim() || 'Nuevo Corset JAZYALON',
@@ -1045,7 +1018,13 @@ export default function HoneCatalog({
       onAddMultipleProducts(createdPayloads);
     } else if (!isStoreConnected) {
       try {
-        await supabase.from('products').insert(createdPayloads);
+        await supabase
+          .from('products')
+          .insert(
+            createdPayloads.map((p, idx) =>
+              mapProductToDbRow({ ...p, id: `prod-${Date.now()}-${idx}` })
+            )
+          );
         fetchProducts();
       } catch (err) {
         showToast('Error guardando lote: ' + err.message, 'error');
@@ -1123,7 +1102,9 @@ export default function HoneCatalog({
     }
 
     try {
-      const { error } = await supabase.from('products').update(updatedFields).eq('id', id);
+      const existing = products.find(p => p.id === id) || {};
+      const dbPatch = mapProductToDbRow({ ...existing, ...updatedFields, id });
+      const { error } = await supabase.from('products').update(dbPatch).eq('id', id);
       if (error) throw error;
       setLocalProducts(products.map(p => (p.id === id ? { ...p, ...updatedFields } : p)));
       setQuickEditId(null);
@@ -1149,9 +1130,10 @@ export default function HoneCatalog({
     }
 
     try {
-      const { data, error } = await supabase.from('products').insert([duplicated]).select().single();
+      const dbRow = mapProductToDbRow({ ...duplicated, id: `prod-${Date.now()}` });
+      const { data, error } = await supabase.from('products').insert([dbRow]).select().single();
       if (error) throw error;
-      setLocalProducts([data, ...products]);
+      setLocalProducts([mapDbRowToProduct(data), ...products]);
       showToast(`Producto duplicado con SKU: ${newSku}`);
     } catch (err) {
       showToast('Error al duplicar: ' + err.message, 'error');
@@ -1452,7 +1434,15 @@ export default function HoneCatalog({
         if (isStoreConnected && onUpdateProduct) {
           onUpdateProduct(prod.id, patch);
         } else {
-          await supabase.from('products').update(patch).eq('id', prod.id);
+          await supabase
+            .from('products')
+            .update({
+              price: nextPrice,
+              old_price: nextOldPrice,
+              discount: pct,
+              badge: patch.badge
+            })
+            .eq('id', prod.id);
         }
         updatedCount++;
       }
@@ -1520,10 +1510,13 @@ export default function HoneCatalog({
     }
 
     try {
+      const dbRow = mapProductToDbRow(
+        editingComboId ? { ...payload, id: editingComboId } : { ...payload, id: `prod-${Date.now()}` }
+      );
       if (editingComboId) {
-        await supabase.from('products').update(payload).eq('id', editingComboId);
+        await supabase.from('products').update(dbRow).eq('id', editingComboId);
       } else {
-        await supabase.from('products').insert([payload]);
+        await supabase.from('products').insert([dbRow]);
       }
       setComboModalOpen(false);
       fetchProducts();
@@ -1639,7 +1632,13 @@ export default function HoneCatalog({
       if (isStoreConnected && onAddMultipleProducts) {
         onAddMultipleProducts(importPreview);
       } else {
-        await supabase.from('products').insert(importPreview);
+        await supabase
+          .from('products')
+          .insert(
+            importPreview.map((p, idx) =>
+              mapProductToDbRow({ ...p, id: `prod-${Date.now()}-${idx}` })
+            )
+          );
         fetchProducts();
       }
       setImportPreview([]);

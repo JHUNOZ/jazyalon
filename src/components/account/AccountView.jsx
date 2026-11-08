@@ -32,6 +32,7 @@ export default function AccountView({ setCurrentView }) {
     setIsAuthOpen,
     orders,
     orderStages,
+    trackOrderByCode,
     wishlist,
     addToCart,
     showToast
@@ -39,6 +40,7 @@ export default function AccountView({ setCurrentView }) {
 
   const [activeTab, setActiveTab] = useState('orders'); // 'orders' | 'wishlist' | 'profile'
   const [trackingSearch, setTrackingSearch] = useState('');
+  const [cloudTrackedOrder, setCloudTrackedOrder] = useState(null);
   const [profileForm, setProfileForm] = useState({
     name: currentUser?.name || '',
     phone: currentUser?.phone || '',
@@ -60,11 +62,43 @@ export default function AccountView({ setCurrentView }) {
     }
   }, [currentUser]);
 
+  // Consulta pública segura por código exacto en Supabase cuando la clienta busca sin sesión
+  useEffect(() => {
+    const q = trackingSearch.trim();
+    if (q.length < 6 || typeof trackOrderByCode !== 'function') {
+      setCloudTrackedOrder(null);
+      return undefined;
+    }
+
+    const localHit = (orders || []).some(
+      (o) =>
+        o.orderNumber?.toLowerCase() === q.toLowerCase() ||
+        o.trackingCode?.toLowerCase() === q.toLowerCase()
+    );
+    if (localHit) {
+      setCloudTrackedOrder(null);
+      return undefined;
+    }
+
+    let active = true;
+    const timer = setTimeout(async () => {
+      const found = await trackOrderByCode(q);
+      if (active) {
+        setCloudTrackedOrder(found || null);
+      }
+    }, 320);
+
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [trackingSearch, orders, trackOrderByCode]);
+
   // Aislamiento real de pedidos: cada clienta ve únicamente sus propias órdenes (o búsqueda exacta por #orden / código)
   const visibleOrders = useMemo(() => {
     const q = trackingSearch.trim().toLowerCase();
     if (q !== '') {
-      return (orders || []).filter(
+      const localMatches = (orders || []).filter(
         (o) =>
           o.orderNumber?.toLowerCase() === q ||
           o.trackingCode?.toLowerCase() === q ||
@@ -72,12 +106,14 @@ export default function AccountView({ setCurrentView }) {
             (o.orderNumber?.toLowerCase().includes(q) ||
               o.customerEmail?.toLowerCase().includes(q)))
       );
+      if (localMatches.length > 0) return localMatches;
+      return cloudTrackedOrder ? [cloudTrackedOrder] : [];
     }
     if (!currentUser) return [];
     if (isAdmin) return orders || [];
     const userEmail = normalizeEmail(currentUser.email);
     return (orders || []).filter((o) => normalizeEmail(o.customerEmail) === userEmail);
-  }, [orders, currentUser, isAdmin, trackingSearch]);
+  }, [orders, currentUser, isAdmin, trackingSearch, cloudTrackedOrder]);
 
   const handleAddAllWishlistToCart = () => {
     wishlist.forEach((product) => {
