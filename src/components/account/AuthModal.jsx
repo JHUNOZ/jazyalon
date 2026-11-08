@@ -383,32 +383,6 @@ export default function AuthModal({ setCurrentView }) {
               ? 'Entrar a mi Cuenta'
               : 'Crear Cuenta Segura'}
           </button>
-
-          {isLocalhost && (
-            <div className="pt-3.5 mt-3.5 border-t border-[#E5E0D8] space-y-2">
-              <div className="text-[10px] uppercase tracking-wider text-[#7A7167] font-bold text-center">
-                Acceso Rápido Localhost
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={handleQuickAdmin}
-                  className="py-2 px-3 rounded-lg bg-[#181514] hover:bg-[#9E7B3B] text-white text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                >
-                  <Crown className="w-3.5 h-3.5 text-[#C8A96B]" />
-                  <span>Panel Admin</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={handleQuickCustomer}
-                  className="py-2 px-3 rounded-lg bg-[#F5F3EF] hover:bg-[#EAE5DC] text-[#181514] border border-[#D8D1C5] text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                >
-                  <Sparkles className="w-3.5 h-3.5 text-[#9E7B3B]" />
-                  <span>Clienta Demo</span>
-                </button>
-              </div>
-            </div>
-          )}
         </form>
       </div>
     </div>

@@ -1863,22 +1863,11 @@ export default function AdminPanelView({ onClose, setCurrentView }) {
               flexWrap: 'wrap'
             }}
           >
-            {isLocalDev && typeof quickAdminLogin === 'function' && (
-              <button
-                type="button"
-                onClick={() => quickAdminLogin()}
-                className={styles.btnGhost}
-                style={{ flex: 1 }}
-              >
-                <Zap size={13} color="#8C6A2E" />
-                <span>Acceso Rápido Local</span>
-              </button>
-            )}
             <button
               type="button"
               onClick={handleExitAdmin}
               className={styles.btnGhost}
-              style={{ flex: 1 }}
+              style={{ width: '100%' }}
             >
               <span>Volver a la tienda</span>
             </button>

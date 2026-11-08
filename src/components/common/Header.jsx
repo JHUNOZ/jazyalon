@@ -327,26 +327,14 @@ export default function Header({ currentView, setCurrentView }) {
                 )}
               </div>
             ) : (
-              <div className="hidden sm:flex items-center gap-3">
+              <div className="flex items-center">
                 <button 
                   onClick={() => setIsAuthOpen(true)}
-                  className="text-white hover:text-luxury-gold transition-all duration-300 transform hover:scale-105 active:scale-95 flex items-center gap-1.5 font-semibold"
+                  className="text-white hover:text-luxury-gold transition-all duration-300 transform hover:scale-105 active:scale-95 flex items-center gap-1.5 font-semibold text-xs sm:text-sm"
                   title="Acceso / Mi Cuenta"
                 >
                   <User className="w-3.5 h-3.5 text-luxury-gold/90" />
                   <span>Acceso</span>
-                </button>
-                <button
-                  onClick={() => navigateTo('admin')}
-                  className={`px-2.5 py-1 rounded-full border transition-all duration-300 flex items-center gap-1 text-[10px] font-bold ${
-                    currentView === 'admin'
-                      ? 'bg-[#C8A96B] text-black border-[#C8A96B]'
-                      : 'border-[#C8A96B]/40 text-[#C8A96B] hover:bg-[#C8A96B] hover:text-black'
-                  }`}
-                  title="Acceso Directo Panel de Administración (Localhost)"
-                >
-                  <Crown className="w-3 h-3" />
-                  <span>Admin</span>
                 </button>
               </div>
             )}
@@ -608,13 +596,15 @@ export default function Header({ currentView, setCurrentView }) {
                   </button>
                 )}
 
-                <button 
-                  onClick={() => navigateTo('admin')} 
-                  className="w-full py-3 rounded-xl bg-[#9E7B3B] text-white font-bold flex items-center justify-center gap-2 transition-all duration-300 shadow-sm"
-                >
-                  <Crown className="w-4 h-4" />
-                  <span>Panel de Administración (HONE)</span>
-                </button>
+                {isAdmin && (
+                  <button 
+                    onClick={() => navigateTo('admin')} 
+                    className="w-full py-3 rounded-xl bg-[#9E7B3B] text-white font-bold flex items-center justify-center gap-2 transition-all duration-300 shadow-sm"
+                  >
+                    <Crown className="w-4 h-4" />
+                    <span>Panel de Administración (HONE)</span>
+                  </button>
+                )}
               </div>
 
             </div>
