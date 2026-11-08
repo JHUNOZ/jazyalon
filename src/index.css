@@ -377,7 +377,8 @@
 
 /* ---------- Product card affordances for touch devices ---------- */
 @media (hover: none) {
-  .jz-card-actions { opacity: 1 !important; transform: none !important; }
+  /* En móviles dejamos las fotos limpias y elegantes sin taparlas de botones gigantes */
+  .jz-card-actions { opacity: 0; pointer-events: none; }
 }
 
 /* ---------- Reduced motion: everything calm and static ---------- */

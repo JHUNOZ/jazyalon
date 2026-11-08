@@ -286,13 +286,13 @@ export default function Header({ currentView, setCurrentView }) {
             <button 
               onClick={() => setIsSearchOpen(true)}
               aria-label="Buscar productos"
-              className="p-2 text-white hover:text-luxury-gold rounded-full transition-all duration-300 transform hover:scale-125 active:scale-95"
+              className="p-1.5 sm:p-2 text-white hover:text-luxury-gold rounded-full transition-all duration-300 transform hover:scale-115 active:scale-95"
               title="Buscar"
             >
               <Search className="w-4 h-4 sm:w-5 sm:h-5" />
             </button>
 
-            {/* Acceso / Usuario Logeado + Panel Admin */}
+            {/* Acceso / Usuario Logeado (En móviles vive dentro del menú para no saturar la barra) */}
             {currentUser ? (
               <div className="hidden sm:flex items-center gap-2.5">
                 <button
@@ -327,7 +327,7 @@ export default function Header({ currentView, setCurrentView }) {
                 )}
               </div>
             ) : (
-              <div className="flex items-center">
+              <div className="hidden sm:flex items-center">
                 <button 
                   onClick={() => setIsAuthOpen(true)}
                   className="text-white hover:text-luxury-gold transition-all duration-300 transform hover:scale-105 active:scale-95 flex items-center gap-1.5 font-semibold text-xs sm:text-sm"

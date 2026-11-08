@@ -55,33 +55,45 @@ export default function NewArrivals({ setCurrentView }) {
           </span>
         </div>
 
-        {/* Filter tabs: synchronized with categories */}
-        <Reveal className="mt-3 flex flex-wrap items-end justify-between gap-3 sm:mt-4" y={10}>
-          <div className="flex flex-wrap gap-x-6 gap-y-2" role="tablist" aria-label="Filtrar nuevos ingresos">
-            {dynamicTabs.map((tab) => {
-              const active = activeTab === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={active}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`jz-label relative pb-1 transition-colors duration-300 ${active ? 'text-[#181514] font-bold' : 'text-[#8A8178] hover:text-[#181514]'}`}
-                >
-                  {tab.label}
-                  <span
-                    className={`absolute inset-x-0 bottom-0 h-0.5 origin-left bg-[#9E7B3B] transition-transform duration-300 [transition-timing-function:var(--jz-ease)] ${active ? 'scale-x-100' : 'scale-x-0'}`}
-                  />
-                </button>
-              );
-            })}
-          </div>
+        {/* Filter tabs: synchronized with categories (Compact swipeable horizontal pill bar on mobile) */}
+        <Reveal className="mt-3 sm:mt-4" y={10}>
+          <div className="flex items-center justify-between gap-3 flex-wrap sm:flex-nowrap">
+            {/* Scroll horizontal suave en móviles sin saturar */}
+            <div 
+              className="flex items-center gap-2 overflow-x-auto pb-1.5 pt-0.5 no-scrollbar w-full sm:w-auto -mx-4 px-4 sm:mx-0 sm:px-0" 
+              role="tablist" 
+              aria-label="Filtrar nuevos ingresos"
+            >
+              {dynamicTabs.map((tab) => {
+                const active = activeTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`shrink-0 px-3 py-1.5 rounded-full text-[10px] sm:text-xs uppercase tracking-wider font-semibold transition-all duration-300 ${
+                      active
+                        ? 'bg-[#181514] text-white shadow-sm'
+                        : 'bg-[#EDE8DE] text-[#6E655D] hover:text-[#181514] hover:bg-[#E2DDD2]'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                );
+              })}
+            </div>
 
-          <button type="button" onClick={openCatalog} className="jz-label jz-link text-[#181514] hover:text-[#9E7B3B] font-bold">
-            Ver Todos los Nuevos Ingresos
-            <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
-          </button>
+            <button 
+              type="button" 
+              onClick={openCatalog} 
+              className="hidden sm:inline-flex items-center gap-1 text-[11px] uppercase tracking-wider text-[#181514] hover:text-[#9E7B3B] font-bold shrink-0"
+            >
+              <span>Ver Catálogo</span>
+              <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
+          </div>
         </Reveal>
 
         {/* Clean, perfectly aligned luxury grid */}

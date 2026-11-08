@@ -189,9 +189,9 @@ export default function ProductCard({ product, isCollectionPrimaryBadge = false 
             </button>
           </div>
 
-          {/* Hover Overlay Action Buttons */}
+          {/* Hover Overlay Action Buttons (Discreto en desktop, limpio en móvil) */}
           <div
-            className={`jz-card-actions absolute inset-x-0 bottom-0 translate-y-3 p-3 opacity-0 transition-[opacity,transform] duration-500 ${ease} group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:translate-y-0 group-focus-within:opacity-100 z-10`}
+            className={`hidden sm:block jz-card-actions absolute inset-x-0 bottom-0 translate-y-3 p-3 opacity-0 transition-[opacity,transform] duration-500 ${ease} group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:translate-y-0 group-focus-within:opacity-100 z-10`}
           >
             <div className="grid grid-cols-2 gap-1.5">
               <button
@@ -235,7 +235,7 @@ export default function ProductCard({ product, isCollectionPrimaryBadge = false 
         </div>
 
         {/* BELOW PHOTO: COLOR PICKER & SIZE SELECTOR */}
-        <div className="mt-2.5 space-y-2">
+        <div className="mt-2 space-y-1.5">
           {/* Colors Swatches Row */}
           <div className="flex items-center justify-between gap-1">
             <div className="flex items-center gap-1.5 flex-wrap" role="group" aria-label="Elegir color">
@@ -248,7 +248,7 @@ export default function ProductCard({ product, isCollectionPrimaryBadge = false 
                     onClick={(e) => handleSelectColor(i, e)}
                     title={`Color: ${c.name}`}
                     aria-label={`Seleccionar color ${c.name}`}
-                    className={`relative w-4 h-4 sm:w-4.5 sm:h-4.5 rounded-full border transition-all duration-200 transform hover:scale-115 ${
+                    className={`relative w-3.5 h-3.5 sm:w-4.5 sm:h-4.5 rounded-full border transition-all duration-200 transform hover:scale-115 ${
                       isActive 
                         ? 'ring-2 ring-[#9E7B3B] ring-offset-1 ring-offset-[#FAF8F5] scale-110 border-white' 
                         : 'border-[#A39A8E]/60 hover:border-[#181514]'
@@ -264,7 +264,7 @@ export default function ProductCard({ product, isCollectionPrimaryBadge = false 
             </div>
 
             {/* Active Color Name */}
-            <span className="text-[10px] text-[#8A8178] truncate max-w-[120px] font-medium">
+            <span className="text-[9px] sm:text-[10px] text-[#8A8178] truncate max-w-[100px] sm:max-w-[120px] font-medium">
               {activeColor.name}
             </span>
           </div>
@@ -280,14 +280,14 @@ export default function ProductCard({ product, isCollectionPrimaryBadge = false 
                   key={sz}
                   type="button"
                   onClick={(e) => handleSelectSize(sz, isAvailable, e)}
-                  title={isAvailable ? `Talla ${sz} (Disponible)` : `Talla ${sz} (Agotada - Clic para avisarte cuando vuelva a estar disponible)`}
+                  title={isAvailable ? `Talla ${sz}` : `Talla ${sz} (Agotada)`}
                   aria-pressed={isSelected}
-                  className={`text-[9px] uppercase px-1.5 py-0.5 rounded transition-all font-mono font-bold cursor-pointer ${
+                  className={`text-[8.5px] sm:text-[9px] uppercase px-1.5 py-0.5 rounded transition-all font-mono font-bold cursor-pointer ${
                     isSelected
                       ? 'bg-[#9E7B3B] text-white shadow-xs border border-[#9E7B3B]'
                       : isAvailable
-                        ? 'bg-[#EDE8DE] text-[#181514] border border-[#D6CEBF] hover:border-[#9E7B3B] hover:text-[#9E7B3B]'
-                        : 'bg-[#F2EFE9] text-[#A39A8E] border border-dashed border-[#D6CEBF] hover:border-[#9E7B3B] hover:text-[#181514] line-through opacity-70'
+                        ? 'bg-[#EDE8DE] text-[#181514] border border-[#D6CEBF] hover:border-[#9E7B3B]'
+                        : 'bg-[#F2EFE9] text-[#A39A8E] border border-dashed border-[#D6CEBF] line-through opacity-60'
                   }`}
                 >
                   {sz}
@@ -298,32 +298,45 @@ export default function ProductCard({ product, isCollectionPrimaryBadge = false 
         </div>
 
         {/* PRODUCT TITLE & CATEGORY */}
-        <div className="mt-2.5">
-          <p className="jz-label text-[0.625rem] text-[#8A8178] font-bold uppercase tracking-wider">
+        <div className="mt-1.5 sm:mt-2">
+          <p className="text-[9px] sm:text-[10px] text-[#8A8178] font-bold uppercase tracking-wider truncate">
             {product.categoryName}
           </p>
           <h3 
             onClick={handleOpenDetail}
-            className="jz-display line-clamp-2 text-[1.15rem] leading-[1.15] text-[#181514] font-normal hover:text-[#9E7B3B] transition-colors cursor-pointer mt-0.5"
+            className="jz-display line-clamp-2 text-[1rem] sm:text-[1.15rem] leading-snug sm:leading-[1.15] text-[#181514] font-normal hover:text-[#9E7B3B] transition-colors cursor-pointer mt-0.5"
           >
             {product.name}
           </h3>
         </div>
       </div>
 
-      {/* PRICE */}
-      <div className="mt-2 pt-1 border-t border-[#D6CEBF]/50 flex items-baseline justify-between">
-        <span className="text-[10px] text-[#8A8178] font-sans">Precio:</span>
-        <div className="flex items-baseline gap-2">
+      {/* PRICE + MOBILE QUICK ADD */}
+      <div className="mt-2 pt-1 border-t border-[#D6CEBF]/50 flex items-center justify-between gap-1">
+        <div className="flex items-baseline gap-1.5 flex-wrap">
           {product.oldPrice && (
-            <span className="text-[11px] tabular-nums text-[#8A8178] line-through font-mono">
+            <span className="text-[10px] sm:text-[11px] tabular-nums text-[#8A8178] line-through font-mono">
               {formatCLP(product.oldPrice)}
             </span>
           )}
-          <span className="text-sm font-bold tabular-nums text-[#181514] font-mono">
+          <span className="text-xs sm:text-sm font-bold tabular-nums text-[#181514] font-mono">
             {formatCLP(product.price)}
           </span>
         </div>
+
+        {/* Botón sutil en móviles al lado del precio para comprar sin invadir la foto */}
+        <button
+          type="button"
+          onClick={handleQuickAdd}
+          aria-label={`Añadir ${product.name} al carro`}
+          className="sm:hidden p-1.5 rounded-lg bg-[#9E7B3B] text-white active:scale-95 transition-transform shadow-xs"
+        >
+          {justAdded ? (
+            <Check className="w-3.5 h-3.5" />
+          ) : (
+            <ShoppingBag className="w-3.5 h-3.5" />
+          )}
+        </button>
       </div>
     </article>
   );
